@@ -1569,6 +1569,21 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionPoint,               bed_mesh_probe_distance))
     ((ConfigOptionFloat,               adaptive_bed_mesh_margin))
 
+    // FullSpectrum: mixed-color filament / dithering settings
+    ((ConfigOptionFloat,              mixed_color_layer_height_a))
+    ((ConfigOptionFloat,              mixed_color_layer_height_b))
+    ((ConfigOptionBool,               mixed_filament_gradient_mode))
+    ((ConfigOptionFloat,              mixed_filament_height_lower_bound))
+    ((ConfigOptionFloat,              mixed_filament_height_upper_bound))
+    ((ConfigOptionBool,               mixed_filament_advanced_dithering))
+    ((ConfigOptionFloat,              mixed_filament_pointillism_pixel_size))
+    ((ConfigOptionFloat,              mixed_filament_pointillism_line_gap))
+    ((ConfigOptionFloat,              mixed_filament_surface_indentation))
+    ((ConfigOptionString,             mixed_filament_definitions))
+    ((ConfigOptionFloat,              dithering_z_step_size))
+    ((ConfigOptionBool,               dithering_local_z_mode))
+    ((ConfigOptionBool,               dithering_step_painted_zones_only))
+
 
 )
 

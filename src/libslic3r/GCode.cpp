@@ -4313,6 +4313,51 @@ std::string GCode::generate_skirt(const Print &print,
     return gcode;
 }
 
+// FullSpectrum: mixed-filament pointillism helpers.
+// These support same-layer interleaved color mixing by splitting extrusion paths
+// into short alternating segments for different extruders.
+
+static std::vector<unsigned int> pointillism_sequence_for_row_for_gcode(const MixedFilament& mf, size_t num_physical)
+{
+    std::vector<unsigned int> sequence;
+    if (!mf.enabled || num_physical == 0 || mf.distribution_mode != int(MixedFilament::SameLayerPointillisme))
+        return sequence;
+
+    if (!mf.manual_pattern.empty()) {
+        sequence.reserve(mf.manual_pattern.size());
+        for (const char token : mf.manual_pattern) {
+            unsigned int id = 0;
+            if (token == '1')      id = mf.component_a;
+            else if (token == '2') id = mf.component_b;
+            else if (token >= '3' && token <= '9') id = unsigned(token - '0');
+            if (id >= 1 && id <= num_physical)
+                sequence.emplace_back(id);
+        }
+        return sequence;
+    }
+
+    // Simple alternation based on ratio.
+    const int ra = std::max(1, mf.ratio_a);
+    const int rb = std::max(1, mf.ratio_b);
+    sequence.reserve(ra + rb);
+    for (int i = 0; i < ra; ++i) sequence.emplace_back(mf.component_a);
+    for (int i = 0; i < rb; ++i) sequence.emplace_back(mf.component_b);
+    return sequence;
+}
+
+static size_t unique_extruder_count_for_gcode(const std::vector<unsigned int>& seq, size_t num_physical)
+{
+    std::vector<bool> seen(num_physical + 1, false);
+    size_t count = 0;
+    for (unsigned int id : seq) {
+        if (id >= 1 && id <= num_physical && !seen[id]) {
+            seen[id] = true;
+            ++count;
+        }
+    }
+    return count;
+}
+
 // In sequential mode, process_layer is called once per each object and its copy,
 // therefore layers will contain a single entry and single_object_instance_idx will point to the copy of the object.
 // In non-sequential mode, process_layer is called per each print_z height with all object and support layers accumulated.
@@ -4649,6 +4694,31 @@ LayerResult GCode::process_layer(
     // Group extrusions by an extruder, then by an object, an island and a region.
     std::map<unsigned int, std::vector<ObjectByExtruder>> by_extruder;
     bool is_anything_overridden = const_cast<LayerTools&>(layer_tools).wiping_extrusions().is_anything_overridden();
+
+    // FullSpectrum: cache for pointillism sequences per filament ID.
+    std::map<unsigned int, std::vector<unsigned int>> pointillism_sequence_cache;
+    auto pointillism_sequence_for_filament = [&](unsigned int filament_id_1based) -> const std::vector<unsigned int>* {
+        if (filament_id_1based == 0 || layer_tools.mixed_mgr == nullptr || layer_tools.num_physical == 0)
+            return nullptr;
+        auto cache_it = pointillism_sequence_cache.find(filament_id_1based);
+        if (cache_it != pointillism_sequence_cache.end())
+            return cache_it->second.empty() ? nullptr : &cache_it->second;
+
+        std::vector<unsigned int> sequence;
+        if (layer_tools.mixed_mgr->is_mixed(filament_id_1based, layer_tools.num_physical)) {
+            const MixedFilament* mixed_row = layer_tools.mixed_mgr->mixed_filament_from_id(filament_id_1based, layer_tools.num_physical);
+            if (mixed_row != nullptr)
+                sequence = pointillism_sequence_for_row_for_gcode(*mixed_row, layer_tools.num_physical);
+            if (unique_extruder_count_for_gcode(sequence, layer_tools.num_physical) < 2)
+                sequence.clear();
+        }
+
+        auto inserted = pointillism_sequence_cache.emplace(filament_id_1based, std::move(sequence));
+        return inserted.first->second.empty() ? nullptr : &inserted.first->second;
+    };
+    // Pointillism is a future TODO for full per-island path splitting integration.
+    // The lambda is ready but not yet wired into the per-region extrusion loop.
+    (void)pointillism_sequence_for_filament;
     for (const LayerToPrint &layer_to_print : layers) {
         if (layer_to_print.support_layer != nullptr) {
             const SupportLayer &support_layer = *layer_to_print.support_layer;

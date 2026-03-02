@@ -489,6 +489,11 @@ struct Sidebar::priv
     wxStaticText *  m_text_printer_settings = nullptr;
     wxPanel* m_panel_printer_content = nullptr;
 
+    // FullSpectrum: mixed color filament panel
+    StaticBox*   m_panel_mixed_filaments_title   = nullptr;
+    wxPanel*     m_panel_mixed_filaments_content = nullptr;
+    wxBoxSizer*  m_sizer_mixed_filaments_content = nullptr;
+
     ObjectList          *m_object_list{ nullptr };
     ObjectSettings      *object_settings{ nullptr };
     ObjectLayers        *object_layers{ nullptr };
@@ -2142,6 +2147,46 @@ Sidebar::Sidebar(Plater *parent)
     scrolled_sizer->Add(p->m_panel_filament_content, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(SidebarProps::ContentMarginV())); // ORCA use vertical margin on parent otherwise it shows scrollbar even on 1 filament
     }
 
+    // FullSpectrum: Mixed Colors panel (shown when ≥2 filaments are loaded).
+    {
+        p->m_panel_mixed_filaments_title = new StaticBox(p->scrolled, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL | wxBORDER_NONE);
+        p->m_panel_mixed_filaments_title->SetBackgroundColor(title_bg);
+        p->m_panel_mixed_filaments_title->SetBackgroundColor2(0xF1F1F1);
+        p->m_panel_mixed_filaments_title->Bind(wxEVT_LEFT_UP, [this](wxMouseEvent &e) {
+            if (p->m_panel_mixed_filaments_content) {
+                const bool showing = p->m_panel_mixed_filaments_content->IsShown();
+                p->m_panel_mixed_filaments_content->Show(!showing);
+                p->scrolled->GetParent()->Layout();
+                p->scrolled->Refresh();
+            }
+        });
+
+        auto *mx_icon  = new ScalableButton(p->m_panel_mixed_filaments_title, wxID_ANY, "filament");
+        auto *mx_label = new Label(p->m_panel_mixed_filaments_title, _L("Mixed Colors"), LB_PROPAGATE_MOUSE_EVENT);
+        mx_label->SetFont(Label::Head_14);
+
+        auto *h_sizer_mx = new wxBoxSizer(wxHORIZONTAL);
+        h_sizer_mx->Add(mx_icon,  0, wxALIGN_CENTER_VERTICAL | wxLEFT,  FromDIP(SidebarProps::TitlebarMargin()));
+        h_sizer_mx->Add(mx_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT,  FromDIP(4));
+        h_sizer_mx->AddStretchSpacer();
+        p->m_panel_mixed_filaments_title->SetSizer(h_sizer_mx);
+        p->m_panel_mixed_filaments_title->SetMinSize({-1, FromDIP(36)});
+        p->m_panel_mixed_filaments_title->Layout();
+        scrolled_sizer->Add(p->m_panel_mixed_filaments_title, 0, wxEXPAND | wxALL, 0);
+
+        p->m_panel_mixed_filaments_content = new wxPanel(p->scrolled, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
+        p->m_panel_mixed_filaments_content->SetBackgroundColour(*wxWHITE);
+        p->m_sizer_mixed_filaments_content = new wxBoxSizer(wxVERTICAL);
+        p->m_sizer_mixed_filaments_content->AddSpacer(FromDIP(4));
+        p->m_panel_mixed_filaments_content->SetSizer(p->m_sizer_mixed_filaments_content);
+        p->m_panel_mixed_filaments_content->Layout();
+        scrolled_sizer->Add(p->m_panel_mixed_filaments_content, 0, wxEXPAND, 0);
+
+        // Initially hidden; show once 2+ filaments are loaded.
+        p->m_panel_mixed_filaments_title->Hide();
+        p->m_panel_mixed_filaments_content->Hide();
+    }
+
     {
     //add project title
     auto params_panel = ((MainFrame*)parent->GetParent())->m_param_panel;
@@ -3033,6 +3078,7 @@ void Sidebar::on_filament_count_change(size_t num_filaments)
     p->m_panel_filament_title->Refresh();
     update_ui_from_settings();
     update_dynamic_filament_list();
+    update_mixed_filament_panel();
 }
 
 void Sidebar::on_filaments_delete(size_t filament_id)
@@ -3655,6 +3701,85 @@ void Sidebar::show_SEMM_buttons(bool bshow)
     if (p->m_flushing_volume_btn && p->combos_filament.size() > 1) // ORCA add filament count as condition to prevent showing Flushing volumes and Del Filament icon visible while only 1 filament exist
         p->m_flushing_volume_btn->Show(bshow);
     Layout();
+}
+
+// FullSpectrum: refresh the mixed color filament panel when filament count or colors change.
+void Sidebar::update_mixed_filament_panel()
+{
+    if (!p->m_panel_mixed_filaments_title || !p->m_panel_mixed_filaments_content)
+        return;
+
+    auto *preset_bundle = wxGetApp().preset_bundle;
+    if (!preset_bundle)
+        return;
+
+    const size_t num_physical = p->combos_filament.size();
+    ConfigOptionStrings *color_opt = preset_bundle->project_config.option<ConfigOptionStrings>("filament_colour");
+    std::vector<std::string> filament_colors = color_opt ? color_opt->values : std::vector<std::string>();
+    filament_colors.resize(num_physical, "#26A69A");
+
+    if (num_physical < 2) {
+        p->m_panel_mixed_filaments_title->Hide();
+        p->m_panel_mixed_filaments_content->Hide();
+        m_scrolled_sizer->Layout();
+        return;
+    }
+
+    // Re-generate mixed filament combinations.
+    preset_bundle->mixed_filaments.auto_generate(filament_colors);
+    const auto &mixed = preset_bundle->mixed_filaments.mixed_filaments();
+
+    // Clear old rows.
+    p->m_sizer_mixed_filaments_content->Clear(true);
+
+    for (size_t i = 0; i < mixed.size(); ++i) {
+        const auto &mf = mixed[i];
+        if (mf.deleted)
+            continue;
+
+        auto *row = new wxPanel(p->m_panel_mixed_filaments_content, wxID_ANY);
+        row->SetBackgroundColour(*wxWHITE);
+        auto *row_sizer = new wxBoxSizer(wxHORIZONTAL);
+
+        // Color swatch.
+        const wxColour swatch_col(wxString::FromUTF8(mf.display_color.empty() ? "#888888" : mf.display_color));
+        auto *swatch = new wxPanel(row, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(16), FromDIP(16)));
+        swatch->SetBackgroundColour(swatch_col);
+
+        // Label.
+        const wxString label_text = wxString::Format(_L("Filament %u + Filament %u"), mf.component_a, mf.component_b);
+        auto *label = new wxStaticText(row, wxID_ANY, label_text);
+        label->SetFont(Label::Body_12);
+
+        // Enable/disable checkbox.
+        auto *chk = new wxCheckBox(row, wxID_ANY, wxEmptyString);
+        chk->SetValue(mf.enabled);
+        const size_t idx = i;
+        chk->Bind(wxEVT_CHECKBOX, [preset_bundle, idx](wxCommandEvent &evt) {
+            auto &mfs = preset_bundle->mixed_filaments.mixed_filaments();
+            if (idx < mfs.size())
+                mfs[idx].enabled = evt.IsChecked();
+        });
+
+        row_sizer->AddSpacer(FromDIP(12));
+        row_sizer->Add(swatch, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(6));
+        row_sizer->Add(label,  1, wxALIGN_CENTER_VERTICAL, 0);
+        row_sizer->Add(chk,    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+        row->SetSizer(row_sizer);
+        row->SetMinSize({-1, FromDIP(28)});
+
+        p->m_sizer_mixed_filaments_content->Add(row, 0, wxEXPAND | wxBOTTOM, FromDIP(2));
+    }
+
+    p->m_sizer_mixed_filaments_content->AddSpacer(FromDIP(4));
+    p->m_panel_mixed_filaments_content->Layout();
+
+    p->m_panel_mixed_filaments_title->Show();
+    p->m_panel_mixed_filaments_content->Show();
+
+    m_scrolled_sizer->Layout();
+    p->scrolled->GetParent()->Layout();
+    p->scrolled->Refresh();
 }
 
 void Sidebar::update_dynamic_filament_list()
@@ -16176,6 +16301,7 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
             if (update_filament_colors_in_full_config()) {
                 p->sidebar->obj_list()->update_filament_colors();
                 p->sidebar->update_dynamic_filament_list();
+                p->sidebar->update_mixed_filament_panel();
                 continue;
             }
         }

@@ -11,6 +11,7 @@
 #include "../FilamentGroup.hpp"
 #include "../ExtrusionEntity.hpp"
 #include "../PrintConfig.hpp"
+#include "../MixedFilament.hpp"
 
 namespace Slic3r {
 
@@ -153,6 +154,8 @@ public:
     // If per layer extruder switches are inserted by the G-code preview slider, this value contains the new (1 based) extruder, with which the whole object layer is being printed with.
     // If not overriden, it is set to 0.
     unsigned int 				extruder_override = 0;
+    // FullSpectrum: sequential layer index (0-based), used by mixed-filament resolution.
+    int                         layer_index = 0;
     // Should a skirt be printed at this layer?
     // Layers are marked for infinite skirt aka draft shield. Not all the layers have to be printed.
     bool                        has_skirt = false;
@@ -171,6 +174,18 @@ public:
         m_wiping_extrusions.set_layer_tools_ptr(this);
         return m_wiping_extrusions;
     }
+
+    // FullSpectrum: mixed-filament resolution context.
+    // Set by ToolOrdering during collect_extruders().
+    const MixedFilamentManager *mixed_mgr    = nullptr;
+    size_t                      num_physical = 0;
+    // Optional mixed-layer cadence override from print settings.
+    float                       mixed_layer_height_a    = 0.f;
+    float                       mixed_layer_height_b    = 0.f;
+    float                       mixed_base_layer_height = 0.2f;
+
+    // Resolve a 1-based filament ID through the mixed-filament manager for this layer.
+    unsigned int resolve_mixed_1based(unsigned int filament_id) const;
 
 private:
     // This object holds list of extrusion that will be used for extruder wiping
@@ -267,6 +282,15 @@ private:
     std::vector<unsigned int> generate_first_layer_tool_order(const Print& print);
     std::vector<unsigned int> generate_first_layer_tool_order(const PrintObject& object);
 
+    // FullSpectrum: update mixed-layer height settings from print config.
+    void                      update_mixed_layer_height_settings();
+
+    // FullSpectrum: resolve a 1-based filament ID through the mixed-filament manager.
+    unsigned int resolve_mixed(unsigned int filament_id_1based,
+                               int          layer_index,
+                               float        layer_print_z = 0.f,
+                               float        layer_height  = 0.f) const;
+
     std::vector<LayerTools>    m_layer_tools;
     // First printing extruder, including the multi-material priming sequence.
     unsigned int               m_first_printing_extruder = (unsigned int)-1;
@@ -280,6 +304,13 @@ private:
     Print*                     m_print;
     bool                       m_sorted = false;
     bool                       m_is_BBL_printer = false;
+
+    // FullSpectrum: mixed-filament support.
+    const MixedFilamentManager* m_mixed_mgr             = nullptr;
+    size_t                      m_num_physical           = 0;
+    float                       m_mixed_layer_height_a   = 0.f;
+    float                       m_mixed_layer_height_b   = 0.f;
+    float                       m_mixed_base_layer_height = 0.2f;
 
     FilamentChangeStats        m_stats_by_single_extruder;
     FilamentChangeStats        m_stats_by_multi_extruder_curr;

@@ -204,6 +204,8 @@ public:
     static bool should_show_SEMM_buttons();
     void show_SEMM_buttons(bool bshow);
     void update_dynamic_filament_list();
+    // FullSpectrum: update the mixed color filament panel in the sidebar.
+    void update_mixed_filament_panel();
 
     PlaterPresetComboBox *  printer_combox();
     ObjectList*             obj_list();

@@ -234,7 +234,21 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "bed_temperature_formula",
         "filament_notes",
         "process_notes",
-        "printer_notes"
+        "printer_notes",
+        // FullSpectrum: mixed-color filament / dithering keys
+        "mixed_color_layer_height_a",
+        "mixed_color_layer_height_b",
+        "mixed_filament_gradient_mode",
+        "mixed_filament_height_lower_bound",
+        "mixed_filament_height_upper_bound",
+        "mixed_filament_advanced_dithering",
+        "mixed_filament_pointillism_pixel_size",
+        "mixed_filament_pointillism_line_gap",
+        "mixed_filament_surface_indentation",
+        "mixed_filament_definitions",
+        "dithering_z_step_size",
+        "dithering_local_z_mode",
+        "dithering_step_painted_zones_only"
     };
 
     static std::unordered_set<std::string> steps_ignore;

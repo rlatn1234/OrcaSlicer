@@ -17,6 +17,7 @@
 #include "GCode/ThumbnailData.hpp"
 #include "GCode/GCodeProcessor.hpp"
 #include "MultiMaterialSegmentation.hpp"
+#include "MixedFilament.hpp"
 #include "libslic3r.h"
 
 #include <Eigen/Geometry>
@@ -1067,6 +1068,10 @@ public:
     const bool is_BBL_printer() const { return m_isBBLPrinter; }
     bool &is_QIDI_printer() { return m_isQIDIPrinter; }
     const bool is_QIDI_printer() const { return m_isQIDIPrinter; }
+
+    // FullSpectrum: mixed-color filament manager.
+    const MixedFilamentManager& mixed_filament_manager() const { return m_mixed_filament_mgr; }
+    MixedFilamentManager&       mixed_filament_manager()       { return m_mixed_filament_mgr; }
     CalibMode& calib_mode() { return m_calib_params.mode; }
     const CalibMode calib_mode() const { return m_calib_params.mode; }
     void set_calib_params(const Calib_Params& params);
@@ -1135,6 +1140,8 @@ private:
     //SoftFever
     bool m_isBBLPrinter;
     bool m_isQIDIPrinter;
+    // FullSpectrum: mixed-color filament manager (owned by Print).
+    MixedFilamentManager                    m_mixed_filament_mgr;
 
     // Ordered collections of extrusion paths to build skirt loops and brim.
     ExtrusionEntityCollection               m_skirt;

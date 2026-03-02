@@ -179,6 +179,11 @@ set(lisbslic3r_sources
     Flow.hpp
     FlushVolCalc.cpp
     FlushVolCalc.hpp
+    MixedFilament.hpp
+    MixedFilament.cpp
+    filament_mixer.h
+    filament_mixer.cpp
+    filament_mixer_model.h
     Format/3mf.cpp
     Format/3mf.hpp
     Format/AMF.cpp
