@@ -6197,7 +6197,11 @@ void ObjectList::set_extruder_for_selected_items(const int extruder)
 {
     // BBS: check extruder id
     std::vector<std::string> colors = wxGetApp().plater()->get_extruder_colors_from_plater_config();
-    if (extruder > colors.size())
+    const size_t num_physical = colors.size();
+    // Allow virtual mixed filament IDs (> num_physical) in addition to physical ones.
+    const auto *bundle = wxGetApp().preset_bundle;
+    const size_t total = bundle ? bundle->mixed_filaments.total_filaments(num_physical) : num_physical;
+    if (extruder > (int)total)
         return;
 
     wxDataViewItemArray sels;

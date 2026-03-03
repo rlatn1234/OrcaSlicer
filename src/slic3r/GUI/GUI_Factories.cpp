@@ -936,6 +936,7 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
         initial_extruder = config.has("extruder") ? config.extruder() : 1;
     }
 
+    // Physical filaments: 0 (default) .. filaments_cnt
     for (int i = 0; i <= filaments_cnt; i++)
     {
         bool is_active_extruder = i == initial_extruder;
@@ -956,7 +957,7 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
             item_name << " (" + _L("current") + ")";
         }
 
-        if (icon_idx >= 0 && icon_idx < icons.size()) {
+        if (icon_idx >= 0 && icon_idx < (int)icons.size()) {
             append_menu_item(
                 extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, *icons[icon_idx], menu,
                 [is_active_extruder]() { return !is_active_extruder; }, m_parent);
@@ -964,6 +965,35 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
             append_menu_item(
                 extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, "", menu,
                 [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+        }
+    }
+
+    // Mixed (virtual) filaments: IDs starting at filaments_cnt + 1
+    const auto *bundle = wxGetApp().preset_bundle;
+    if (bundle) {
+        int virtual_id = filaments_cnt + 1;
+        for (const auto &mf : bundle->mixed_filaments.mixed_filaments()) {
+            if (mf.deleted || !mf.enabled) {
+                ++virtual_id;
+                continue;
+            }
+            const int i = virtual_id;
+            bool is_active_extruder = i == initial_extruder;
+            wxString item_name = wxString::Format(_L("Mix: Filament %u + Filament %u"), mf.component_a, mf.component_b);
+            if (is_active_extruder)
+                item_name << " (" + _L("current") + ")";
+
+            const int icon_idx = i - 1; // virtual IDs follow physical ones in icons vector
+            if (icon_idx >= 0 && icon_idx < (int)icons.size()) {
+                append_menu_item(
+                    extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, *icons[icon_idx], menu,
+                    [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+            } else {
+                append_menu_item(
+                    extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, "", menu,
+                    [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+            }
+            ++virtual_id;
         }
     }
 

@@ -2156,8 +2156,7 @@ Sidebar::Sidebar(Plater *parent)
             if (p->m_panel_mixed_filaments_content) {
                 const bool showing = p->m_panel_mixed_filaments_content->IsShown();
                 p->m_panel_mixed_filaments_content->Show(!showing);
-                p->scrolled->GetParent()->Layout();
-                p->scrolled->Refresh();
+                m_scrolled_sizer->Layout();
             }
         });
 
