@@ -156,6 +156,8 @@ public:
     unsigned int 				extruder_override = 0;
     // FullSpectrum: sequential layer index (0-based), used by mixed-filament resolution.
     int                         layer_index = 0;
+    // FullSpectrum: physical height of this layer, used for layer-cadence mixed-filament resolution.
+    float                       layer_height = 0.f;
     // Should a skirt be printed at this layer?
     // Layers are marked for infinite skirt aka draft shield. Not all the layers have to be printed.
     bool                        has_skirt = false;

@@ -557,7 +557,7 @@ std::vector<wxBitmap*> get_extruder_color_icons(bool thin_icon/* = false*/)
             }
         }
     } else {
-        std::vector<std::string> colors = Slic3r::GUI::wxGetApp().plater()->get_extruder_colors_from_plater_config();
+        std::vector<std::string> colors = Slic3r::GUI::wxGetApp().plater()->get_extruder_colors_from_plater_config(nullptr, false);
         if (colors.empty()) return bmps;
 
         const double em          = Slic3r::GUI::wxGetApp().em_unit();
