@@ -3728,7 +3728,7 @@ void Sidebar::update_mixed_filament_panel()
     preset_bundle->mixed_filaments.auto_generate(filament_colors);
     const auto &mixed = preset_bundle->mixed_filaments.mixed_filaments();
 
-    // Clear old rows.
+    // Clear all existing rows.
     p->m_sizer_mixed_filaments_content->Clear(true);
 
     for (size_t i = 0; i < mixed.size(); ++i) {
@@ -3740,20 +3740,41 @@ void Sidebar::update_mixed_filament_panel()
         row->SetBackgroundColour(*wxWHITE);
         auto *row_sizer = new wxBoxSizer(wxHORIZONTAL);
 
-        // Color swatch.
+        // Mixed color preview swatch.
         const wxColour swatch_col(wxString::FromUTF8(mf.display_color.empty() ? "#888888" : mf.display_color));
         auto *swatch = new wxPanel(row, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(16), FromDIP(16)));
         swatch->SetBackgroundColour(swatch_col);
 
-        // Label.
+        // Label: "Filament X + Filament Y"
         const wxString label_text = wxString::Format(_L("Filament %u + Filament %u"), mf.component_a, mf.component_b);
         auto *label = new wxStaticText(row, wxID_ANY, label_text);
         label->SetFont(Label::Body_12);
 
+        // B ratio (%) SpinCtrl — integer 0-100 representing the mixing ratio of filament B.
+        auto *spin = new wxSpinCtrl(row, wxID_ANY, wxEmptyString,
+                                    wxDefaultPosition, wxSize(FromDIP(44), -1),
+                                    wxSP_ARROW_KEYS | wxTE_PROCESS_ENTER, 0, 100, mf.mix_b_percent);
+        spin->SetFont(Label::Body_12);
+        auto *pct_label = new wxStaticText(row, wxID_ANY, "%");
+        pct_label->SetFont(Label::Body_12);
+
+        const size_t idx = i;
+        // Recompute display_color and update the swatch when the percentage changes.
+        auto on_percent_change = [preset_bundle, idx, swatch, filament_colors](int new_val) {
+            auto &mfs = preset_bundle->mixed_filaments.mixed_filaments();
+            if (idx >= mfs.size()) return;
+            mfs[idx].mix_b_percent = new_val;
+            preset_bundle->mixed_filaments.recompute_display_colors(filament_colors);
+            const std::string &dc = mfs[idx].display_color;
+            swatch->SetBackgroundColour(wxColour(wxString::FromUTF8(dc.empty() ? "#888888" : dc)));
+            swatch->Refresh();
+        };
+        spin->Bind(wxEVT_SPINCTRL,   [on_percent_change](wxSpinEvent &e)     { on_percent_change(e.GetValue()); });
+        spin->Bind(wxEVT_TEXT_ENTER, [spin, on_percent_change](wxCommandEvent &) { on_percent_change(spin->GetValue()); });
+
         // Enable/disable checkbox.
         auto *chk = new wxCheckBox(row, wxID_ANY, wxEmptyString);
         chk->SetValue(mf.enabled);
-        const size_t idx = i;
         chk->Bind(wxEVT_CHECKBOX, [preset_bundle, idx](wxCommandEvent &evt) {
             auto &mfs = preset_bundle->mixed_filaments.mixed_filaments();
             if (idx < mfs.size())
@@ -3761,9 +3782,11 @@ void Sidebar::update_mixed_filament_panel()
         });
 
         row_sizer->AddSpacer(FromDIP(12));
-        row_sizer->Add(swatch, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(6));
-        row_sizer->Add(label,  1, wxALIGN_CENTER_VERTICAL, 0);
-        row_sizer->Add(chk,    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+        row_sizer->Add(swatch,    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(6));
+        row_sizer->Add(label,     1, wxALIGN_CENTER_VERTICAL, 0);
+        row_sizer->Add(spin,      0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(4));
+        row_sizer->Add(pct_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(2));
+        row_sizer->Add(chk,       0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
         row->SetSizer(row_sizer);
         row->SetMinSize({-1, FromDIP(28)});
 
@@ -3777,8 +3800,6 @@ void Sidebar::update_mixed_filament_panel()
     p->m_panel_mixed_filaments_content->Show();
 
     m_scrolled_sizer->Layout();
-    p->scrolled->GetParent()->Layout();
-    p->scrolled->Refresh();
 }
 
 void Sidebar::update_dynamic_filament_list()

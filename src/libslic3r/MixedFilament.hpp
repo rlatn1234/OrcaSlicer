@@ -175,6 +175,11 @@ public:
                                    const std::string &color_b,
                                    int ratio_a, int ratio_b);
 
+    // Recompute display colours for all mixed entries without changing any
+    // other state (ratios, enabled flags, etc.). Call after manually editing
+    // mix_b_percent or other blend parameters.
+    void recompute_display_colors(const std::vector<std::string> &filament_colours);
+
     // ---- Accessors ------------------------------------------------------
 
     const std::vector<MixedFilament> &mixed_filaments() const { return m_mixed; }

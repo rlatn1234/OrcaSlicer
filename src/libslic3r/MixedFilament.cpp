@@ -725,8 +725,9 @@ void MixedFilamentManager::auto_generate(const std::vector<std::string> &filamen
                 if (!prev.custom &&
                     prev.component_a == mf.component_a &&
                     prev.component_b == mf.component_b) {
-                    mf.enabled = prev.enabled;
-                    mf.deleted = prev.deleted;
+                    mf.enabled       = prev.enabled;
+                    mf.deleted       = prev.deleted;
+                    mf.mix_b_percent = prev.mix_b_percent; // preserve user-set percentage
                     if (mf.deleted)
                         mf.enabled = false;
                     break;
@@ -1244,6 +1245,11 @@ void MixedFilamentManager::refresh_display_colors(const std::vector<std::string>
             filament_colours[mf.component_b - 1],
             ratio_a, ratio_b);
     }
+}
+
+void MixedFilamentManager::recompute_display_colors(const std::vector<std::string> &filament_colours)
+{
+    refresh_display_colors(filament_colours);
 }
 
 size_t MixedFilamentManager::enabled_count() const
