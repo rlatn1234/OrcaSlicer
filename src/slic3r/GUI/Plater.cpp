@@ -3947,12 +3947,13 @@ private:
                 dc.DrawRectangle(x, rect.GetTop(), std::max(1, w), rect.GetHeight());
             }
         }
-        auto draw_text = [&dc, &rect](const wxString &text, bool left) {
+        auto draw_text = [this, &dc, &rect](const wxString &text, bool left) {
             if (text.empty()) return;
             wxCoord tw = 0, th = 0;
             dc.GetTextExtent(text, &tw, &th);
             const int ty = rect.GetTop() + std::max(0, (rect.GetHeight() - int(th)) / 2);
-            const int tx = left ? rect.GetLeft() + FromDIP(4) : rect.GetRight() - FromDIP(4) - int(tw);
+            const int pad = FromDIP(4);
+            const int tx = left ? rect.GetLeft() + pad : rect.GetRight() - pad - int(tw);
             for (int ox = -1; ox <= 1; ++ox)
                 for (int oy = -1; oy <= 1; ++oy)
                     if (ox || oy) { dc.SetTextForeground(*wxWHITE); dc.DrawText(text, tx + ox, ty + oy); }
