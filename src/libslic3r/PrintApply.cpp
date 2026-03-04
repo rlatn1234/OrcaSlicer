@@ -1104,6 +1104,58 @@ static PrintObjectRegions* generate_print_object_regions(
     return out.release();
 }
 
+static inline void append_unique_painted_extruder(std::vector<unsigned int> &painting_extruders,
+                                                  unsigned int                extruder_id,
+                                                  size_t                      num_physical_extruders)
+{
+    if (extruder_id < 1 || extruder_id > num_physical_extruders)
+        return;
+    if (std::find(painting_extruders.begin(), painting_extruders.end(), extruder_id) == painting_extruders.end())
+        painting_extruders.emplace_back(extruder_id);
+}
+
+static void append_same_layer_component_extruders(const MixedFilamentManager &mixed_mgr,
+                                                  unsigned int                state_id,
+                                                  size_t                      num_physical_extruders,
+                                                  std::vector<unsigned int>  &painting_extruders)
+{
+    if (state_id <= num_physical_extruders)
+        return;
+
+    const MixedFilament *mixed_row = mixed_mgr.mixed_filament_from_id(state_id, num_physical_extruders);
+    if (mixed_row == nullptr || !mixed_row->enabled || mixed_row->distribution_mode != int(MixedFilament::SameLayerPointillisme))
+        return;
+
+    append_unique_painted_extruder(painting_extruders, mixed_row->component_a, num_physical_extruders);
+    append_unique_painted_extruder(painting_extruders, mixed_row->component_b, num_physical_extruders);
+
+    for (char token : mixed_row->gradient_component_ids) {
+        if (token < '1' || token > '9')
+            continue;
+        append_unique_painted_extruder(painting_extruders, unsigned(token - '0'), num_physical_extruders);
+    }
+
+    for (char token : mixed_row->manual_pattern) {
+        unsigned int extruder_id = 0;
+        if (token == '1')
+            extruder_id = mixed_row->component_a;
+        else if (token == '2')
+            extruder_id = mixed_row->component_b;
+        else if (token >= '3' && token <= '9')
+            extruder_id = unsigned(token - '0');
+
+        append_unique_painted_extruder(painting_extruders, extruder_id, num_physical_extruders);
+    }
+}
+
+static bool same_layer_pointillism_enabled(const MixedFilamentManager &mixed_mgr)
+{
+    for (const MixedFilament &mf : mixed_mgr.mixed_filaments())
+        if (mf.enabled && mf.distribution_mode == int(MixedFilament::SameLayerPointillisme))
+            return true;
+    return false;
+}
+
 Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_config)
 {
 #ifdef _DEBUG
@@ -1655,6 +1707,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             print_object_regions->ref_cnt_inc();
         }
         std::vector<unsigned int> painting_extruders;
+        const bool same_layer_mode_active = same_layer_pointillism_enabled(m_mixed_filament_mgr);
         if (const auto &volumes = print_object.model_object()->volumes;
             num_extruders > 1 &&
             std::find_if(volumes.begin(), volumes.end(), [](const ModelVolume *v) { return ! v->mmu_segmentation_facets.empty(); }) != volumes.end()) {
@@ -1668,9 +1721,69 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
                     used_facet_states[state_idx] |= volume_used_facet_states[state_idx];
             }
 
+            size_t dropped_painted_states = 0;
             for (size_t state_idx = static_cast<size_t>(EnforcerBlockerType::Extruder1); state_idx < used_facet_states.size(); ++state_idx) {
-                if (used_facet_states[state_idx])
-                    painting_extruders.emplace_back(state_idx);
+                if (!used_facet_states[state_idx])
+                    continue;
+                if (state_idx <= num_total_filaments) {
+                    painting_extruders.emplace_back(static_cast<unsigned int>(state_idx));
+                    append_same_layer_component_extruders(m_mixed_filament_mgr,
+                                                          static_cast<unsigned int>(state_idx),
+                                                          num_extruders,
+                                                          painting_extruders);
+                } else
+                    ++dropped_painted_states;
+            }
+            std::sort(painting_extruders.begin(), painting_extruders.end());
+            painting_extruders.erase(std::unique(painting_extruders.begin(), painting_extruders.end()), painting_extruders.end());
+
+            bool expanded_all_channels_for_same_layer = false;
+            if (same_layer_mode_active && !painting_extruders.empty()) {
+                const unsigned int max_channel = unsigned(std::min<size_t>(num_total_filaments, size_t(EnforcerBlockerType::ExtruderMax)));
+                for (unsigned int channel_id = 1; channel_id <= max_channel; ++channel_id)
+                    painting_extruders.emplace_back(channel_id);
+                std::sort(painting_extruders.begin(), painting_extruders.end());
+                painting_extruders.erase(std::unique(painting_extruders.begin(), painting_extruders.end()), painting_extruders.end());
+                expanded_all_channels_for_same_layer = true;
+            }
+
+            if (dropped_painted_states > 0) {
+                BOOST_LOG_TRIVIAL(warning) << "Print::apply dropping painted extruder IDs above available filament range"
+                                           << " dropped_states=" << dropped_painted_states
+                                           << " physical_filaments=" << num_extruders
+                                           << " total_filaments=" << num_total_filaments;
+            }
+
+            if (!painting_extruders.empty()) {
+                std::string painting_ids;
+                for (size_t i = 0; i < painting_extruders.size(); ++i) {
+                    if (i > 0)
+                        painting_ids += ",";
+                    painting_ids += std::to_string(painting_extruders[i]);
+                }
+
+                const unsigned int max_painted_extruder = *std::max_element(painting_extruders.begin(), painting_extruders.end());
+                if (max_painted_extruder > num_total_filaments) {
+                    BOOST_LOG_TRIVIAL(warning) << "Print::apply detected painted extruder IDs above available filament range"
+                                               << " painted_extruders=[" << painting_ids << "]"
+                                               << " physical_filaments=" << num_extruders
+                                               << " total_filaments=" << num_total_filaments
+                                               << " same_layer_expand_all_channels=" << (expanded_all_channels_for_same_layer ? 1 : 0);
+                } else {
+                    if (same_layer_mode_active) {
+                        BOOST_LOG_TRIVIAL(warning) << "Print::apply collected painted extruders"
+                                                   << " painted_extruders=[" << painting_ids << "]"
+                                                   << " physical_filaments=" << num_extruders
+                                                   << " total_filaments=" << num_total_filaments
+                                                   << " same_layer_expand_all_channels=" << (expanded_all_channels_for_same_layer ? 1 : 0);
+                    } else {
+                        BOOST_LOG_TRIVIAL(debug) << "Print::apply collected painted extruders"
+                                                 << " painted_extruders=[" << painting_ids << "]"
+                                                 << " physical_filaments=" << num_extruders
+                                                 << " total_filaments=" << num_total_filaments
+                                                 << " same_layer_expand_all_channels=" << (expanded_all_channels_for_same_layer ? 1 : 0);
+                    }
+                }
             }
         }
         if (model_object_status.print_object_regions_status == ModelObjectStatus::PrintObjectRegionsStatus::Valid) {
