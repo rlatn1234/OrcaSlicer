@@ -204,6 +204,8 @@ public:
     static bool should_show_SEMM_buttons();
     void show_SEMM_buttons(bool bshow);
     void update_dynamic_filament_list();
+    // FullSpectrum: update the mixed color filament panel in the sidebar.
+    void update_mixed_filament_panel();
 
     PlaterPresetComboBox *  printer_combox();
     ObjectList*             obj_list();
@@ -566,7 +568,7 @@ public:
     void force_print_bed_update();
     // On activating the parent window.
     void on_activate();
-    std::vector<std::string> get_extruder_colors_from_plater_config(const GCodeProcessorResult* const result = nullptr) const;
+    std::vector<std::string> get_extruder_colors_from_plater_config(const GCodeProcessorResult* const result = nullptr, bool include_mixed = true) const;
     std::vector<std::string> get_filament_colors_render_info() const;
     std::vector<std::string> get_filament_color_render_type() const;
     std::vector<std::string> get_colors_for_color_print(const GCodeProcessorResult* const result = nullptr) const;

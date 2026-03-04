@@ -36,9 +36,18 @@ static PrinterTechnology printer_technology()
     return wxGetApp().preset_bundle->printers.get_selected_preset().printer_technology();
 }
 
+static int physical_filaments_count()
+{
+    return std::max(wxGetApp().filaments_cnt(), 0);
+}
+
 static int filaments_count()
 {
-    return wxGetApp().filaments_cnt();
+    if (wxGetApp().preset_bundle == nullptr)
+        return 0;
+    const int physical = physical_filaments_count();
+    const auto &mixed_mgr = wxGetApp().preset_bundle->mixed_filaments;
+    return static_cast<int>(mixed_mgr.total_filaments(size_t(physical)));
 }
 
 static bool is_improper_category(const std::string& category, const int filaments_cnt, const bool is_object_settings = true)
@@ -936,6 +945,7 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
         initial_extruder = config.has("extruder") ? config.extruder() : 1;
     }
 
+    // Physical filaments: 0 (default) .. filaments_cnt
     for (int i = 0; i <= filaments_cnt; i++)
     {
         bool is_active_extruder = i == initial_extruder;
@@ -956,7 +966,7 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
             item_name << " (" + _L("current") + ")";
         }
 
-        if (icon_idx >= 0 && icon_idx < icons.size()) {
+        if (icon_idx >= 0 && icon_idx < (int)icons.size()) {
             append_menu_item(
                 extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, *icons[icon_idx], menu,
                 [is_active_extruder]() { return !is_active_extruder; }, m_parent);
@@ -964,6 +974,35 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
             append_menu_item(
                 extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, "", menu,
                 [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+        }
+    }
+
+    // Mixed (virtual) filaments: IDs starting at filaments_cnt + 1
+    const auto *bundle = wxGetApp().preset_bundle;
+    if (bundle) {
+        int virtual_id = filaments_cnt + 1;
+        for (const auto &mf : bundle->mixed_filaments.mixed_filaments()) {
+            if (mf.deleted || !mf.enabled) {
+                ++virtual_id;
+                continue;
+            }
+            const int i = virtual_id;
+            bool is_active_extruder = i == initial_extruder;
+            wxString item_name = wxString::Format(_L("Mix: Filament %u + Filament %u"), mf.component_a, mf.component_b);
+            if (is_active_extruder)
+                item_name << " (" + _L("current") + ")";
+
+            const int icon_idx = i - 1; // virtual IDs follow physical ones in icons vector
+            if (icon_idx >= 0 && icon_idx < (int)icons.size()) {
+                append_menu_item(
+                    extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, *icons[icon_idx], menu,
+                    [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+            } else {
+                append_menu_item(
+                    extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, "", menu,
+                    [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+            }
+            ++virtual_id;
         }
     }
 
@@ -1551,7 +1590,12 @@ void MenuFactory::create_filament_action_menu(bool init, int active_filament_men
 
     wxMenu* sub_menu = new wxMenu();
     std::vector<wxBitmap*> icons = get_extruder_color_icons(true);
-    int filaments_cnt = Sidebar::should_show_SEMM_buttons() ? icons.size() : 0;
+    // Limit to physical filaments only: icons may include extra entries for
+    // mixed (virtual) filaments appended by get_extruder_color_icons, but
+    // filament_presets only holds physical presets.  Iterating beyond the
+    // physical count would cause an out-of-bounds access on filament_presets.
+    const int num_physical = static_cast<int>(wxGetApp().preset_bundle->filament_presets.size());
+    int filaments_cnt = Sidebar::should_show_SEMM_buttons() ? std::min(num_physical, static_cast<int>(icons.size())) : 0;
     for (int i = 0; i < filaments_cnt; i++) {
         if (i == active_filament_menu_id)
             continue;

@@ -2863,27 +2863,39 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
                         plate_bbox_2d.max = plate_bbox_2d.max(0) <= bboxf.max(0) ? plate_bbox_2d.max : bboxf.max;
                     }
 
+                    const float tower_w = (float) wipe_tower_size(0);    
+                    const float tower_h = (float) wipe_tower_size(1);
+
                     coordf_t plate_bbox_x_min_local_coord = plate_bbox_2d.min(0) - plate_origin(0);
                     coordf_t plate_bbox_y_min_local_coord = plate_bbox_2d.min(1) - plate_origin(1);
                     coordf_t plate_bbox_x_max_local_coord = plate_bbox_2d.max(0) - plate_origin(0);
                     coordf_t plate_bbox_y_max_local_coord = plate_bbox_2d.max(1) - plate_origin(1);
 
-                    const float tower_w = (float) wipe_tower_size(0);    
-                    const float tower_h = (float) wipe_tower_size(1);
-                    const float min_x   = (float) plate_bbox_x_min_local_coord + margin;
-                    const float max_x   = (float) plate_bbox_x_max_local_coord - margin;
-                    const float min_y   = (float) plate_bbox_y_min_local_coord + margin;
-                    const float max_y   = (float) plate_bbox_y_max_local_coord - margin;
-
-                    // snap wipe tower back to nearest edge if it was initially loaded outside the plate boundary
-                    float new_x = (x < min_x) ? min_x : ((x + tower_w > max_x) ? (max_x - tower_w) : x);
-                    float new_y = (y < min_y) ? min_y : ((y + tower_h > max_y) ? (max_y - tower_h) : y);
-
-                    if (new_x != x || new_y != y) {
-                        // do notification
-                        _set_warning_notification(EWarning::PreviewPrimeTowerOutside, true);
-                        x = new_x;
-                        y = new_y;
+                    // Snap wipe tower back inside the plate boundary and persist the corrected
+                    // position to project_config so that slicing uses the correct coordinates.
+                    bool need_update_x = false;
+                    bool need_update_y = false;
+                    if (x + margin + tower_w > (float)plate_bbox_x_max_local_coord) {
+                        x = (float)plate_bbox_x_max_local_coord - tower_w - margin;
+                        need_update_x = true;
+                    } else if (x < (float)plate_bbox_x_min_local_coord + margin) {
+                        x = (float)plate_bbox_x_min_local_coord + margin;
+                        need_update_x = true;
+                    }
+                    if (need_update_x) {
+                        ConfigOptionFloat wt_x_opt(x);
+                        proj_cfg.option<ConfigOptionFloats>("wipe_tower_x")->set_at(&wt_x_opt, plate_id, 0);
+                    }
+                    if (y + margin + tower_h > (float)plate_bbox_y_max_local_coord) {
+                        y = (float)plate_bbox_y_max_local_coord - tower_h - margin;
+                        need_update_y = true;
+                    } else if (y < (float)plate_bbox_y_min_local_coord + margin) {
+                        y = (float)plate_bbox_y_min_local_coord + margin;
+                        need_update_y = true;
+                    }
+                    if (need_update_y) {
+                        ConfigOptionFloat wt_y_opt(y);
+                        proj_cfg.option<ConfigOptionFloats>("wipe_tower_y")->set_at(&wt_y_opt, plate_id, 0);
                     }
 
 

@@ -4760,6 +4760,12 @@ int CLI::run(int argc, char **argv)
                     if (y < WIPE_TOWER_MARGIN) {
                         y = WIPE_TOWER_MARGIN;
                     }
+                    // Clamp to bed upper bounds so the prime tower stays within the build plate.
+                    if (current_printable_width > 0 && current_printable_depth > 0) {
+                        const float tower_width = m_print_config.option<ConfigOptionFloat>("prime_tower_width", true)->value;
+                        x = std::min(x, (float)current_printable_width  - tower_width - (float)WIPE_TOWER_MARGIN);
+                        y = std::min(y, (float)current_printable_depth - tower_width - (float)WIPE_TOWER_MARGIN);
+                    }
 
                     //create the options using default if necessary
                     ConfigOptionFloats* wipe_x_option = m_print_config.option<ConfigOptionFloats>("wipe_tower_x", true);

@@ -557,7 +557,7 @@ std::vector<wxBitmap*> get_extruder_color_icons(bool thin_icon/* = false*/)
             }
         }
     } else {
-        std::vector<std::string> colors = Slic3r::GUI::wxGetApp().plater()->get_extruder_colors_from_plater_config();
+        std::vector<std::string> colors = Slic3r::GUI::wxGetApp().plater()->get_extruder_colors_from_plater_config(nullptr, false);
         if (colors.empty()) return bmps;
 
         const double em          = Slic3r::GUI::wxGetApp().em_unit();
@@ -569,9 +569,22 @@ std::vector<wxBitmap*> get_extruder_color_icons(bool thin_icon/* = false*/)
             bmps.push_back(get_extruder_color_icon(color, label, icon_width, icon_height));
         }
     }
+    // Append icons for enabled mixed (virtual) filaments.
+    auto *preset_bundle = Slic3r::GUI::wxGetApp().preset_bundle;
+    if (preset_bundle) {
+        const double em         = Slic3r::GUI::wxGetApp().em_unit();
+        const int    icon_width  = lround((thin_icon ? 2 : 4.4) * em);
+        const int    icon_height = lround(2 * em);
+        int index = (int)bmps.size();
+        for (const auto &mf : preset_bundle->mixed_filaments.mixed_filaments()) {
+            if (mf.deleted || !mf.enabled)
+                continue;
+            const std::string &color = mf.display_color.empty() ? "#888888" : mf.display_color;
+            bmps.push_back(get_extruder_color_icon(color, std::to_string(++index), icon_width, icon_height));
+        }
+    }
+
     return bmps;
-
-
 }
 
 std::vector<std::vector<std::string>> read_color_pack(std::vector<std::string> color_pack) {
