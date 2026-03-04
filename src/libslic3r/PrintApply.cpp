@@ -1168,6 +1168,40 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
 	new_full_config.option("print_settings_id",            true);
 	new_full_config.option("filament_settings_id",         true);
 	new_full_config.option("printer_settings_id",          true);
+    // Ensure newly introduced dithering keys are present so in-session updates are detected.
+    new_full_config.option("dithering_z_step_size", true);
+    new_full_config.option("dithering_local_z_mode", true);
+    new_full_config.option("dithering_step_painted_zones_only", true);
+    new_full_config.option("mixed_filament_gradient_mode", true);
+    new_full_config.option("mixed_filament_height_lower_bound", true);
+    new_full_config.option("mixed_filament_height_upper_bound", true);
+    new_full_config.option("mixed_filament_advanced_dithering", true);
+    new_full_config.option("mixed_filament_pointillism_pixel_size", true);
+    new_full_config.option("mixed_filament_pointillism_line_gap", true);
+    new_full_config.option("mixed_filament_surface_indentation", true);
+    new_full_config.option("mixed_filament_definitions", true);
+    m_config.option("dithering_z_step_size", true);
+    m_config.option("dithering_local_z_mode", true);
+    m_config.option("dithering_step_painted_zones_only", true);
+    m_config.option("mixed_filament_gradient_mode", true);
+    m_config.option("mixed_filament_height_lower_bound", true);
+    m_config.option("mixed_filament_height_upper_bound", true);
+    m_config.option("mixed_filament_advanced_dithering", true);
+    m_config.option("mixed_filament_pointillism_pixel_size", true);
+    m_config.option("mixed_filament_pointillism_line_gap", true);
+    m_config.option("mixed_filament_surface_indentation", true);
+    m_config.option("mixed_filament_definitions", true);
+    m_default_object_config.option("dithering_z_step_size", true);
+    m_default_object_config.option("dithering_local_z_mode", true);
+    m_default_object_config.option("dithering_step_painted_zones_only", true);
+    m_default_object_config.option("mixed_filament_gradient_mode", true);
+    m_default_object_config.option("mixed_filament_height_lower_bound", true);
+    m_default_object_config.option("mixed_filament_height_upper_bound", true);
+    m_default_object_config.option("mixed_filament_advanced_dithering", true);
+    m_default_object_config.option("mixed_filament_pointillism_pixel_size", true);
+    m_default_object_config.option("mixed_filament_pointillism_line_gap", true);
+    m_default_object_config.option("mixed_filament_surface_indentation", true);
+    m_default_object_config.option("mixed_filament_definitions", true);
 
     // BBS
     std::vector <unsigned int> used_filaments = this->extruders(true);
@@ -1316,6 +1350,81 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             num_extruders  = m_config.filament_diameter.size();
             num_extruders_changed  = true;
         }
+    }
+
+    // FullSpectrum: Read mixed-filament config values and rebuild the engine-side manager.
+    // This ensures the manager is always consistent with the config even when Print::apply()
+    // is called independently of the GUI-side sync in Plater.
+    {
+        int   mixed_gradient_mode   = 0;
+        float mixed_height_lower    = 0.04f;
+        float mixed_height_upper    = 0.16f;
+        bool  mixed_advanced_dither = false;
+        float mixed_pointillism_pixel_size = 0.f;
+        float mixed_pointillism_line_gap   = 0.f;
+        float mixed_surface_indentation    = 0.f;
+        std::string mixed_custom_definitions;
+        if (new_full_config.has("mixed_filament_gradient_mode")) {
+            if (const ConfigOptionBool *opt = new_full_config.option<ConfigOptionBool>("mixed_filament_gradient_mode"))
+                mixed_gradient_mode = opt->value ? 1 : 0;
+            else
+                mixed_gradient_mode = new_full_config.opt_int("mixed_filament_gradient_mode");
+        }
+        if (new_full_config.has("mixed_filament_height_lower_bound"))
+            mixed_height_lower = float(new_full_config.opt_float("mixed_filament_height_lower_bound"));
+        if (new_full_config.has("mixed_filament_height_upper_bound"))
+            mixed_height_upper = float(new_full_config.opt_float("mixed_filament_height_upper_bound"));
+        if (new_full_config.has("mixed_filament_advanced_dithering")) {
+            if (const ConfigOptionBool *opt = new_full_config.option<ConfigOptionBool>("mixed_filament_advanced_dithering"))
+                mixed_advanced_dither = opt->value;
+            else
+                mixed_advanced_dither = (new_full_config.opt_int("mixed_filament_advanced_dithering") != 0);
+        }
+        if (new_full_config.has("mixed_filament_pointillism_pixel_size"))
+            mixed_pointillism_pixel_size = float(new_full_config.opt_float("mixed_filament_pointillism_pixel_size"));
+        if (new_full_config.has("mixed_filament_pointillism_line_gap"))
+            mixed_pointillism_line_gap = float(new_full_config.opt_float("mixed_filament_pointillism_line_gap"));
+        if (new_full_config.has("mixed_filament_surface_indentation"))
+            mixed_surface_indentation = float(new_full_config.opt_float("mixed_filament_surface_indentation"));
+        if (new_full_config.has("mixed_filament_definitions"))
+            mixed_custom_definitions = new_full_config.opt_string("mixed_filament_definitions");
+
+        mixed_gradient_mode = std::clamp(mixed_gradient_mode, 0, 1);
+        mixed_height_lower  = std::max(0.01f, mixed_height_lower);
+        mixed_height_upper  = std::max(mixed_height_lower, mixed_height_upper);
+        mixed_pointillism_pixel_size = std::max(0.f, mixed_pointillism_pixel_size);
+        mixed_pointillism_line_gap   = std::max(0.f, mixed_pointillism_line_gap);
+        mixed_surface_indentation    = std::clamp(mixed_surface_indentation, -2.f, 2.f);
+
+        BOOST_LOG_TRIVIAL(info) << "Print::apply mixed settings"
+                                << ", gradient_mode=" << mixed_gradient_mode
+                                << ", lower=" << mixed_height_lower
+                                << ", upper=" << mixed_height_upper
+                                << ", advanced_dither=" << (mixed_advanced_dither ? 1 : 0)
+                                << ", pointillism_pixel_size=" << mixed_pointillism_pixel_size
+                                << ", pointillism_line_gap=" << mixed_pointillism_line_gap
+                                << ", surface_indentation=" << mixed_surface_indentation
+                                << ", custom_definitions_len=" << mixed_custom_definitions.size()
+                                << ", physical_extruders=" << num_extruders;
+
+        std::vector<std::string> physical_filament_colors = m_config.filament_colour.values;
+        physical_filament_colors.resize(num_extruders, "#26A69A");
+        m_mixed_filament_mgr.clear_custom_entries();
+        m_mixed_filament_mgr.auto_generate(physical_filament_colors);
+        m_mixed_filament_mgr.load_custom_entries(mixed_custom_definitions, physical_filament_colors);
+        m_mixed_filament_mgr.apply_gradient_settings(mixed_gradient_mode,
+                                                     mixed_height_lower,
+                                                     mixed_height_upper,
+                                                     mixed_advanced_dither);
+        size_t mixed_custom_count = 0;
+        for (const auto &mf : m_mixed_filament_mgr.mixed_filaments())
+            if (mf.custom)
+                ++mixed_custom_count;
+
+        BOOST_LOG_TRIVIAL(info) << "Print::apply mixed manager state"
+                                << ", mixed_total=" << m_mixed_filament_mgr.mixed_filaments().size()
+                                << ", mixed_enabled=" << m_mixed_filament_mgr.enabled_count()
+                                << ", mixed_custom=" << mixed_custom_count;
     }
 
     // FullSpectrum: Total filaments = physical extruders + enabled mixed (virtual) filaments.

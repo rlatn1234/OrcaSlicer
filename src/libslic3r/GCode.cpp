@@ -4317,45 +4317,213 @@ std::string GCode::generate_skirt(const Print &print,
 // These support same-layer interleaved color mixing by splitting extrusion paths
 // into short alternating segments for different extruders.
 
-static std::vector<unsigned int> pointillism_sequence_for_row_for_gcode(const MixedFilament& mf, size_t num_physical)
+static std::vector<unsigned int> decode_manual_pattern_sequence_for_gcode(const MixedFilament& mf, size_t num_physical)
 {
     std::vector<unsigned int> sequence;
-    if (!mf.enabled || num_physical == 0 || mf.distribution_mode != int(MixedFilament::SameLayerPointillisme))
+    if (mf.manual_pattern.empty())
         return sequence;
-
-    if (!mf.manual_pattern.empty()) {
-        sequence.reserve(mf.manual_pattern.size());
-        for (const char token : mf.manual_pattern) {
-            unsigned int id = 0;
-            if (token == '1')      id = mf.component_a;
-            else if (token == '2') id = mf.component_b;
-            else if (token >= '3' && token <= '9') id = unsigned(token - '0');
-            if (id >= 1 && id <= num_physical)
-                sequence.emplace_back(id);
-        }
-        return sequence;
+    sequence.reserve(mf.manual_pattern.size());
+    for (const char token : mf.manual_pattern) {
+        unsigned int extruder_id = 0;
+        if (token == '1')
+            extruder_id = mf.component_a;
+        else if (token == '2')
+            extruder_id = mf.component_b;
+        else if (token >= '3' && token <= '9')
+            extruder_id = unsigned(token - '0');
+        if (extruder_id >= 1 && extruder_id <= num_physical)
+            sequence.emplace_back(extruder_id);
     }
-
-    // Simple alternation based on ratio.
-    const int ra = std::max(1, mf.ratio_a);
-    const int rb = std::max(1, mf.ratio_b);
-    sequence.reserve(ra + rb);
-    for (int i = 0; i < ra; ++i) sequence.emplace_back(mf.component_a);
-    for (int i = 0; i < rb; ++i) sequence.emplace_back(mf.component_b);
     return sequence;
 }
 
-static size_t unique_extruder_count_for_gcode(const std::vector<unsigned int>& seq, size_t num_physical)
+static std::vector<unsigned int> decode_gradient_component_ids_for_gcode(const MixedFilament& mf, size_t num_physical)
 {
-    std::vector<bool> seen(num_physical + 1, false);
-    size_t count = 0;
-    for (unsigned int id : seq) {
-        if (id >= 1 && id <= num_physical && !seen[id]) {
-            seen[id] = true;
-            ++count;
+    std::vector<unsigned int> ids;
+    if (mf.gradient_component_ids.empty() || num_physical == 0)
+        return ids;
+    bool seen[10] = { false };
+    ids.reserve(mf.gradient_component_ids.size());
+    for (const char c : mf.gradient_component_ids) {
+        if (c < '1' || c > '9')
+            continue;
+        const unsigned int id = unsigned(c - '0');
+        if (id == 0 || id > num_physical || seen[id])
+            continue;
+        seen[id] = true;
+        ids.emplace_back(id);
+    }
+    return ids;
+}
+
+static std::vector<int> decode_gradient_component_weights_for_gcode(const MixedFilament& mf, size_t expected_components)
+{
+    std::vector<int> out;
+    if (mf.gradient_component_weights.empty() || expected_components == 0)
+        return out;
+    std::string token;
+    for (const char c : mf.gradient_component_weights) {
+        if (c >= '0' && c <= '9') {
+            token.push_back(c);
+            continue;
+        }
+        if (!token.empty()) {
+            out.emplace_back(std::max(0, std::atoi(token.c_str())));
+            token.clear();
         }
     }
-    return count;
+    if (!token.empty())
+        out.emplace_back(std::max(0, std::atoi(token.c_str())));
+    if (out.size() != expected_components)
+        return {};
+    return out;
+}
+
+static std::vector<unsigned int> build_weighted_gradient_sequence_for_gcode(const std::vector<unsigned int>& ids,
+                                                                            const std::vector<int>&          weights)
+{
+    if (ids.empty())
+        return {};
+
+    std::vector<unsigned int> filtered_ids;
+    std::vector<int>          counts;
+    filtered_ids.reserve(ids.size());
+    counts.reserve(ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) {
+        const int w = (i < weights.size()) ? std::max(0, weights[i]) : 0;
+        if (w <= 0)
+            continue;
+        filtered_ids.emplace_back(ids[i]);
+        counts.emplace_back(w);
+    }
+    if (filtered_ids.empty()) {
+        filtered_ids = ids;
+        counts.assign(ids.size(), 1);
+    }
+
+    int g = 0;
+    for (const int c : counts)
+        g = std::gcd(g, std::max(1, c));
+    if (g > 1) {
+        for (int &c : counts)
+            c = std::max(1, c / g);
+    }
+
+    int cycle = std::accumulate(counts.begin(), counts.end(), 0);
+    constexpr int k_max_cycle = 48;
+    if (cycle > k_max_cycle) {
+        const double scale = double(k_max_cycle) / double(cycle);
+        for (int &c : counts)
+            c = std::max(1, int(std::round(double(c) * scale)));
+        cycle = std::accumulate(counts.begin(), counts.end(), 0);
+        while (cycle > k_max_cycle) {
+            auto it = std::max_element(counts.begin(), counts.end());
+            if (it == counts.end() || *it <= 1)
+                break;
+            --(*it);
+            --cycle;
+        }
+    }
+    if (cycle <= 0)
+        return {};
+
+    std::vector<unsigned int> sequence;
+    sequence.reserve(size_t(cycle));
+    std::vector<int> emitted(counts.size(), 0);
+    for (int pos = 0; pos < cycle; ++pos) {
+        size_t best_idx = 0;
+        double best_score = -1e9;
+        for (size_t i = 0; i < counts.size(); ++i) {
+            const double target = double((pos + 1) * counts[i]) / double(cycle);
+            const double score = target - double(emitted[i]);
+            if (score > best_score) {
+                best_score = score;
+                best_idx = i;
+            }
+        }
+        ++emitted[best_idx];
+        sequence.emplace_back(filtered_ids[best_idx]);
+    }
+    return sequence;
+}
+
+static size_t unique_extruder_count_for_gcode(const std::vector<unsigned int>& sequence, size_t num_physical)
+{
+    if (sequence.empty() || num_physical == 0)
+        return 0;
+    std::vector<bool> seen(num_physical + 1, false);
+    size_t            unique = 0;
+    for (const unsigned int id : sequence) {
+        if (id == 0 || id > num_physical)
+            continue;
+        if (!seen[id]) {
+            seen[id] = true;
+            ++unique;
+        }
+    }
+    return unique;
+}
+
+static std::vector<unsigned int> pointillism_sequence_for_row_for_gcode(const MixedFilament& mf, size_t num_physical)
+{
+    if (!mf.enabled || num_physical == 0 || mf.distribution_mode != int(MixedFilament::SameLayerPointillisme))
+        return {};
+
+    if (!mf.manual_pattern.empty())
+        return decode_manual_pattern_sequence_for_gcode(mf, num_physical);
+
+    const std::vector<unsigned int> gradient_ids = decode_gradient_component_ids_for_gcode(mf, num_physical);
+    if (gradient_ids.size() >= 2) {
+        const std::vector<int> gradient_weights = decode_gradient_component_weights_for_gcode(mf, gradient_ids.size());
+        const std::vector<unsigned int> weighted =
+            build_weighted_gradient_sequence_for_gcode(gradient_ids,
+                gradient_weights.empty() ? std::vector<int>(gradient_ids.size(), 1) : gradient_weights);
+        if (!weighted.empty())
+            return weighted;
+    }
+
+    if (mf.component_a < 1 || mf.component_a > num_physical ||
+        mf.component_b < 1 || mf.component_b > num_physical ||
+        mf.component_a == mf.component_b)
+        return {};
+
+    int ratio_a = std::max(0, mf.ratio_a);
+    int ratio_b = std::max(0, mf.ratio_b);
+    if (ratio_a == 0 && ratio_b == 0)
+        ratio_a = 1;
+    if (ratio_a > 0 && ratio_b > 0) {
+        const int g = std::gcd(ratio_a, ratio_b);
+        if (g > 1) {
+            ratio_a /= g;
+            ratio_b /= g;
+        }
+    }
+
+    constexpr int k_max_cycle = 24;
+    if (ratio_a + ratio_b > k_max_cycle) {
+        const double scale = double(k_max_cycle) / double(ratio_a + ratio_b);
+        ratio_a = std::max(1, int(std::round(double(ratio_a) * scale)));
+        ratio_b = std::max(1, int(std::round(double(ratio_b) * scale)));
+    }
+
+    const int cycle = std::max(1, ratio_a + ratio_b);
+    std::vector<unsigned int> sequence;
+    sequence.reserve(size_t(cycle));
+    for (int pos = 0; pos < cycle; ++pos) {
+        const int b_before = (pos * ratio_b) / cycle;
+        const int b_after  = ((pos + 1) * ratio_b) / cycle;
+        sequence.emplace_back((b_after > b_before) ? mf.component_b : mf.component_a);
+    }
+
+    bool seen_a = false, seen_b = false;
+    for (unsigned int id : sequence) {
+        if (id == mf.component_a) seen_a = true;
+        if (id == mf.component_b) seen_b = true;
+    }
+    if (!seen_a || !seen_b)
+        return {};
+
+    return sequence;
 }
 
 // In sequential mode, process_layer is called once per each object and its copy,
@@ -4694,6 +4862,16 @@ LayerResult GCode::process_layer(
     // Group extrusions by an extruder, then by an object, an island and a region.
     std::map<unsigned int, std::vector<ObjectByExtruder>> by_extruder;
     bool is_anything_overridden = const_cast<LayerTools&>(layer_tools).wiping_extrusions().is_anything_overridden();
+    const double nozzle_0_mm = m_config.nozzle_diameter.values.empty() ? 0.4 : m_config.nozzle_diameter.get_at(0);
+    const double pointillism_pixel_size_cfg = std::max(0.0, double(m_config.mixed_filament_pointillism_pixel_size.value));
+    const double pointillism_segment_len_mm = pointillism_pixel_size_cfg > EPSILON ?
+        std::max(0.10, pointillism_pixel_size_cfg) :
+        std::max(0.60, 1.60 * nozzle_0_mm);
+    const double pointillism_line_gap_cfg_mm = std::max(0.0, double(m_config.mixed_filament_pointillism_line_gap.value));
+    const double pointillism_line_gap_mm = std::min(pointillism_line_gap_cfg_mm, pointillism_segment_len_mm * 0.90);
+    // Scaled values for future path-splitting integration.
+    (void)pointillism_line_gap_mm;
+    (void)pointillism_segment_len_mm;
 
     // FullSpectrum: cache for pointillism sequences per filament ID.
     std::map<unsigned int, std::vector<unsigned int>> pointillism_sequence_cache;
@@ -4716,7 +4894,7 @@ LayerResult GCode::process_layer(
         auto inserted = pointillism_sequence_cache.emplace(filament_id_1based, std::move(sequence));
         return inserted.first->second.empty() ? nullptr : &inserted.first->second;
     };
-    // Pointillism is a future TODO for full per-island path splitting integration.
+    // Pointillism path splitting is a future TODO for full per-island path splitting integration.
     // The lambda is ready but not yet wired into the per-region extrusion loop.
     (void)pointillism_sequence_for_filament;
     for (const LayerToPrint &layer_to_print : layers) {
