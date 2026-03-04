@@ -235,20 +235,6 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
         "filament_notes",
         "process_notes",
         "printer_notes",
-        // FullSpectrum: mixed-color filament / dithering keys
-        "mixed_color_layer_height_a",
-        "mixed_color_layer_height_b",
-        "mixed_filament_gradient_mode",
-        "mixed_filament_height_lower_bound",
-        "mixed_filament_height_upper_bound",
-        "mixed_filament_advanced_dithering",
-        "mixed_filament_pointillism_pixel_size",
-        "mixed_filament_pointillism_line_gap",
-        "mixed_filament_surface_indentation",
-        "mixed_filament_definitions",
-        "dithering_z_step_size",
-        "dithering_local_z_mode",
-        "dithering_step_painted_zones_only"
     };
 
     static std::unordered_set<std::string> steps_ignore;
@@ -286,6 +272,20 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             || opt_key == "filament_shrinkage_compensation_z"
             || opt_key == "resolution"
             || opt_key == "precise_z_height"
+            // FullSpectrum: mixed-color filament / dithering keys affect per-layer tool ordering.
+            || opt_key == "mixed_color_layer_height_a"
+            || opt_key == "mixed_color_layer_height_b"
+            || opt_key == "mixed_filament_gradient_mode"
+            || opt_key == "mixed_filament_height_lower_bound"
+            || opt_key == "mixed_filament_height_upper_bound"
+            || opt_key == "mixed_filament_advanced_dithering"
+            || opt_key == "mixed_filament_pointillism_pixel_size"
+            || opt_key == "mixed_filament_pointillism_line_gap"
+            || opt_key == "mixed_filament_surface_indentation"
+            || opt_key == "mixed_filament_definitions"
+            || opt_key == "dithering_z_step_size"
+            || opt_key == "dithering_local_z_mode"
+            || opt_key == "dithering_step_painted_zones_only"
             // Spiral Vase forces different kind of slicing than the normal model:
             // In Spiral Vase mode, holes are closed and only the largest area contour is kept at each layer.
             // Therefore toggling the Spiral Vase on / off requires complete reslicing.
@@ -531,10 +531,11 @@ std::vector<unsigned int> Print::extruders(bool conside_custom_gcode) const
 
     if (conside_custom_gcode) {
         //BBS
-        int num_extruders = m_config.filament_colour.size();
+        const size_t num_physical = m_config.filament_colour.size();
+        const size_t num_filaments = m_mixed_filament_mgr.total_filaments(num_physical);
         if (m_model.plates_custom_gcodes.find(m_model.curr_plate_index) != m_model.plates_custom_gcodes.end()) {
             for (auto item : m_model.plates_custom_gcodes.at(m_model.curr_plate_index).gcodes) {
-                if (item.type == CustomGCode::Type::ToolChange && item.extruder <= num_extruders)
+                if (item.type == CustomGCode::Type::ToolChange && item.extruder <= int(num_filaments))
                     extruders.push_back((unsigned int)(item.extruder - 1));
             }
         }
